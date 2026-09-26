@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib as mpl
+from matplotlib.colors import LinearSegmentedColormap
 import seaborn as sns
 
 from utils import (
@@ -17,35 +19,117 @@ st.set_page_config(
     layout="wide",
 )
 
-# ---- CSS PERSONNALISÉ POUR EXPANDERS BLEUS ----
+# ---- PALETTE & STYLE VISUEL (charte cohérente clair/sombre) ----
+PALETTE = {
+    "blue": "#2a78d6",
+    "orange": "#eb6834",
+    "ink": "#0b0b0b",
+    "ink_secondary": "#52514e",
+    "muted": "#898781",
+    "grid": "#e1e0d9",
+    "axis": "#c3c2b7",
+    "surface": "#fcfcfb",
+}
+
+# Rampe séquentielle mono-teinte (bleu, clair -> foncé), utilisée pour les
+# heatmaps et nuages de points afin de garder une seule échelle de couleur
+# cohérente sur tout le dashboard plutôt que des colormaps génériques.
+BLUE_SEQUENTIAL = LinearSegmentedColormap.from_list(
+    "blue_sequential",
+    ["#cde2fb", "#86b6ef", "#3987e5", "#1c5cab", "#0d366b"],
+)
+
+mpl.rcParams.update(
+    {
+        "font.family": "sans-serif",
+        "font.sans-serif": ["Segoe UI", "Helvetica", "Arial", "DejaVu Sans"],
+        "axes.edgecolor": PALETTE["axis"],
+        "axes.labelcolor": PALETTE["ink_secondary"],
+        "text.color": PALETTE["ink"],
+        "xtick.color": PALETTE["muted"],
+        "ytick.color": PALETTE["muted"],
+        "axes.grid": True,
+        "grid.color": PALETTE["grid"],
+        "grid.linewidth": 0.6,
+        "axes.facecolor": PALETTE["surface"],
+        "figure.facecolor": PALETTE["surface"],
+        "savefig.facecolor": PALETTE["surface"],
+    }
+)
+
+
+def style_axes(ax):
+    """Applique le style du dashboard (spines fines, grille discrète) à un axe matplotlib."""
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color(PALETTE["axis"])
+    ax.spines["bottom"].set_color(PALETTE["axis"])
+    ax.grid(axis="y", alpha=0.6)
+    ax.set_axisbelow(True)
+
+
+# ---- CSS : cartes KPI + expanders, cohérents clair/sombre ----
 st.markdown(
     """
     <style>
+    :root {
+        --accent: #2a78d6;
+        --surface: #fcfcfb;
+        --ink: #0b0b0b;
+        --ink-secondary: #52514e;
+        --border: rgba(11,11,11,0.10);
+    }
+    @media (prefers-color-scheme: dark) {
+        :root {
+            --accent: #3987e5;
+            --surface: #1a1a19;
+            --ink: #ffffff;
+            --ink-secondary: #c3c2b7;
+            --border: rgba(255,255,255,0.10);
+        }
+    }
+
+    /* Cartes pour les st.metric */
+    div[data-testid="stMetric"] {
+        background-color: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 14px 16px;
+    }
+    div[data-testid="stMetricLabel"] {
+        color: var(--ink-secondary) !important;
+    }
+
     /* Header de l'expander (fermé) */
     .streamlit-expanderHeader {
-        background-color: #003366 !important; /* bleu foncé */
-        color: white !important;
-        border-radius: 6px;
-        border: 1px solid #1e90ff !important; /* bleu vif */
-        padding: 6px;
+        background-color: var(--surface) !important;
+        color: var(--accent) !important;
+        border-radius: 8px;
+        border: 1px solid var(--border) !important;
+        font-weight: 600;
+        padding: 8px 12px;
     }
 
     /* Header au survol */
     .streamlit-expanderHeader:hover {
-        background-color: #1e90ff !important; /* bleu clair */
-        color: white !important;
+        background-color: var(--accent) !important;
+        color: #ffffff !important;
         cursor: pointer;
     }
 
-    /* Contenu de l’expander (ouvert) */
+    /* Contenu de l'expander (ouvert) */
     .streamlit-expanderContent {
-        background-color: #001f33 !important; /* bleu très foncé */
-        color: white !important;
-        border-left: 2px solid #1e90ff !important;
-        border-right: 2px solid #1e90ff !important;
-        border-bottom: 2px solid #1e90ff !important;
-        border-radius: 0 0 6px 6px;
-        padding: 10px;
+        background-color: var(--surface) !important;
+        color: var(--ink) !important;
+        border-left: 1px solid var(--border) !important;
+        border-right: 1px solid var(--border) !important;
+        border-bottom: 1px solid var(--border) !important;
+        border-radius: 0 0 8px 8px;
+        padding: 12px 14px;
+    }
+
+    hr {
+        margin: 1.4rem 0;
     }
     </style>
     """,
@@ -321,13 +405,17 @@ L’objectif est d’identifier :
     sns.heatmap(
         retention_pct,
         ax=ax,
-        cmap="Blues",
+        cmap=BLUE_SEQUENTIAL,
         annot=True,
         fmt=".0f",
+        annot_kws={"size": 8, "color": PALETTE["ink"]},
+        linewidths=2,
+        linecolor=PALETTE["surface"],
         cbar_kws={"label": "Rétention (%)"},
     )
     ax.set_xlabel("Âge de cohorte (mois)")
     ax.set_ylabel("Cohorte (mois de 1ʳᵉ commande)")
+    fig.tight_layout()
     st.pyplot(fig)
 
     with st.expander("ℹ Comment lire cette heatmap ?"):
@@ -359,10 +447,22 @@ Chaque case correspond à *une cohorte* (ligne) et *un âge* (colonne) :
         pass
 
     fig2, ax2 = plt.subplots(figsize=(8, 4))
-    ax2.plot(ret_curve.index, ret_curve.values, marker="o")
+    ax2.plot(
+        ret_curve.index,
+        ret_curve.values,
+        color=PALETTE["blue"],
+        linewidth=2,
+        marker="o",
+        markersize=7,
+        markerfacecolor=PALETTE["surface"],
+        markeredgecolor=PALETTE["blue"],
+        markeredgewidth=2,
+    )
     ax2.set_xlabel("Âge de cohorte (mois)")
     ax2.set_ylabel("Rétention (%)")
-    ax2.set_title(f"Courbe de rétention – Cohorte {selected_cohort_ret}")
+    ax2.set_title(f"Courbe de rétention – Cohorte {selected_cohort_ret}", color=PALETTE["ink"], fontweight="bold")
+    style_axes(ax2)
+    fig2.tight_layout()
     st.pyplot(fig2)
 
     with st.expander("ℹ Interprétation de la courbe"):
@@ -397,18 +497,42 @@ prioriser les actions CRM (relance, promotions, programmes de fidélité…).
 
     with col1:
         fig3, ax3 = plt.subplots(figsize=(8, 4))
-        ax3.plot(rev.index, rev.values, marker="o")
+        ax3.plot(
+            rev.index,
+            rev.values,
+            color=PALETTE["blue"],
+            linewidth=2,
+            marker="o",
+            markersize=7,
+            markerfacecolor=PALETTE["surface"],
+            markeredgecolor=PALETTE["blue"],
+            markeredgewidth=2,
+        )
         ax3.set_xlabel("Âge (mois)")
         ax3.set_ylabel("Revenu moyen (£)")
-        ax3.set_title(f"Revenu moyen par âge – Cohorte {selected_cohort_rev}")
+        ax3.set_title(f"Revenu moyen par âge – Cohorte {selected_cohort_rev}", color=PALETTE["ink"], fontweight="bold")
+        style_axes(ax3)
+        fig3.tight_layout()
         st.pyplot(fig3)
 
     with col2:
         fig4, ax4 = plt.subplots(figsize=(8, 4))
-        ax4.plot(rev_cum.index, rev_cum.values, marker="o")
+        ax4.plot(
+            rev_cum.index,
+            rev_cum.values,
+            color=PALETTE["orange"],
+            linewidth=2,
+            marker="o",
+            markersize=7,
+            markerfacecolor=PALETTE["surface"],
+            markeredgecolor=PALETTE["orange"],
+            markeredgewidth=2,
+        )
         ax4.set_xlabel("Âge (mois)")
         ax4.set_ylabel("Revenu cumulé (£)")
-        ax4.set_title(f"Revenu cumulé – Cohorte {selected_cohort_rev}")
+        ax4.set_title(f"Revenu cumulé – Cohorte {selected_cohort_rev}", color=PALETTE["ink"], fontweight="bold")
+        style_axes(ax4)
+        fig4.tight_layout()
         st.pyplot(fig4)
 
     with st.expander("ℹ Lecture du revenu cumulé"):
@@ -531,14 +655,20 @@ où investir du temps et du budget marketing.
         rfm_sample["Frequency"],
         rfm_sample["Monetary"],
         c=rfm_sample["RFM_score"],
-        cmap="viridis",
-        alpha=0.6,
+        cmap=BLUE_SEQUENTIAL,
+        s=36,
+        alpha=0.8,
+        edgecolors=PALETTE["surface"],
+        linewidths=0.4,
     )
     ax.set_xlabel("Frequency (nb de commandes)")
     ax.set_ylabel("Monetary (montant total £)")
-    ax.set_title("Dispersion des clients dans l’espace RFM")
+    ax.set_title("Dispersion des clients dans l’espace RFM", color=PALETTE["ink"], fontweight="bold")
     cbar = plt.colorbar(scatter, ax=ax)
-    cbar.set_label("Score RFM")
+    cbar.set_label("Score RFM", color=PALETTE["ink_secondary"])
+    cbar.ax.yaxis.set_tick_params(color=PALETTE["muted"])
+    style_axes(ax)
+    fig.tight_layout()
 
     st.pyplot(fig)
 
