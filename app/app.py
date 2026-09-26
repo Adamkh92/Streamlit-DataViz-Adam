@@ -153,6 +153,9 @@ Cette application répond au besoin de l’équipe marketing de *Online Retail* 
 # ---------- CHARGEMENT DES DONNÉES ----------
 @st.cache_data
 def load_all_data():
+    """Charge les 4 jeux de données déjà nettoyés (voir app/utils.py) et met
+    le résultat en cache Streamlit : le fichier n'est relu qu'une seule fois
+    par session, même si l'utilisateur change les filtres ou de page."""
     df_clean = load_df_clean()
     rfm = load_rfm()
     cohort_retention = load_cohort_retention()
@@ -203,7 +206,8 @@ def filter_transactions(
     if countries:
         df = df[df["Country"].isin(countries)]
 
-    # Gestion des retours (factures commençant par 'C')
+    # Gestion des retours (convention Online Retail II : les factures de
+    # retour commencent par la lettre 'C', et leur Quantity est négative)
     if "Invoice" in df.columns:
         invoice_col = "Invoice"
     else:
@@ -211,6 +215,13 @@ def filter_transactions(
 
     is_return = df[invoice_col].astype(str).str.startswith("C")
 
+    # 3 modes possibles, choisis dans la sidebar :
+    #   - "Inclure"     : on ne touche à rien (comportement par défaut) ;
+    #                      les retours restent en quantité négative.
+    #   - "Exclure"     : on supprime purement et simplement les lignes de retour.
+    #   - "Neutraliser" : on garde les lignes mais on repasse leur quantité en
+    #                      positif, pour compter un volume d'articles sans que
+    #                      les retours ne viennent le diminuer.
     if returns_mode == "Exclure":
         df = df[~is_return]
     elif returns_mode == "Neutraliser":
@@ -268,7 +279,10 @@ Les filtres à gauche permettent de changer la période, les pays ou la gestion 
     nb_segments_rfm = rfm["Segment"].nunique()
     nb_clients_segmentes = rfm.index.nunique()
 
-    # North Star Metric : revenu moyen généré à M+3 par cohorte
+    # North Star Metric : revenu moyen généré à M+3 par cohorte.
+    # Selon la façon dont cohort_avg_rev a été généré, la colonne "âge 3 mois"
+    # peut être nommée "3" (chaîne) ou simplement être la 4e colonne (index 3,
+    # âges 0/1/2/3) : on gère les deux cas plutôt que de supposer un seul nom.
     if "3" in cohort_avg_rev.columns:
         m3_col = "3"
     else:
@@ -594,7 +608,9 @@ Cette page répond à la question :
         )
     )
 
-    # marge et panier moyen approximatifs
+    # Marge et panier moyen approximatifs : faute de donnée de marge réelle
+    # dans le dataset, on applique une hypothèse simple de 40% de marge sur le
+    # chiffre d'affaires (cohérente avec l'hypothèse utilisée page Scénarios).
     seg["marge_moy"] = seg["monetary_moy"] * 0.40
     seg["panier_moyen"] = seg["monetary_moy"] / seg["freq_moy"]
 
@@ -727,10 +743,16 @@ Les *sliders* permettent de tester des *scénarios business* :
     clv_empirique = avg_rev_per_age.sum()
 
     # --- Paramètres baselines pour la formule fermée ---
+    # r_base : rétention mensuelle moyenne observée, en excluant la colonne
+    # d'âge 0 (iloc[:, 1:], qui vaut toujours 100% par définition) puis en
+    # bornant le résultat à [0.01, 0.95] pour éviter tout cas dégénéré
+    # (division par ~0 dans clv_closed si r s'approche de 1+d).
     retention_values = cohort_retention.iloc[:, 1:].stack()
     r_base = float(retention_values.mean())
     r_base = max(0.01, min(0.95, r_base))
 
+    # m_base : marge mensuelle moyenne par client = (CA moyen / 12 mois) x 40%
+    # de marge (même hypothèse de marge que dans la page Segmentation RFM).
     monetary_mean = rfm["Monetary"].mean()
     m_base = (monetary_mean / 12) * 0.40
 
@@ -784,6 +806,9 @@ Les *sliders* permettent de tester des *scénarios business* :
     m_scenario = (monetary_mean / 12) * (marge_pct / 100) * (1 - remise_pct / 100)
 
     def clv_closed(m, r, d):
+        """CLV théorique par la formule fermée (client à durée de vie infinie,
+        rétention constante) : CLV = m * r / (1 + d - r), où m est la marge
+        mensuelle, r la rétention mensuelle et d le taux d'actualisation."""
         return m * r / (1 + d - r)
 
     clv_closed_baseline = clv_closed(m_base, r_base, d_base)
@@ -890,6 +915,10 @@ Colonnes exportées :
 
 
 def main():
+    """Point d'entrée de l'app : construit la sidebar (filtres + navigation),
+    applique les filtres une seule fois, puis route vers la page choisie.
+    Toutes les pages reçoivent les données déjà filtrées en paramètre plutôt
+    que d'aller relire des variables globales."""
     col_date, min_date, max_date = get_date_bounds(df_clean)
 
     with st.sidebar:
